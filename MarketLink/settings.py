@@ -32,7 +32,8 @@ INSTALLED_APPS = [
     'rest_framework',
     'djoser',
     'rest_framework_simplejwt',
-    'users'
+    'users',
+    'vendors'
 
 ]
 
