@@ -1,7 +1,13 @@
-from rest_framework import viewsets, permissions
-from vendors.models import VendorProfile, Service, ServiceVariant
-from vendors.serializers import VendorProfileSerializer, ServiceVariantSerializer, ServiceSerializer
+from rest_framework import viewsets, permissions,status
+from vendors.models import VendorProfile, Service, ServiceVariant,RepairOrder
+from vendors.serializers import VendorProfileSerializer, ServiceVariantSerializer, ServiceSerializer,RepairOrderSerializer,RepairOrderCreateSerializer
 from rest_framework.exceptions import PermissionDenied
+from django.core.cache import cache
+from django.db import transaction
+from drf_yasg.utils import swagger_auto_schema
+from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
+
 
 class VendorProfileViewSet(viewsets.ModelViewSet):
     queryset = VendorProfile.objects.all()
@@ -10,6 +16,8 @@ class VendorProfileViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        if not user.is_authenticated:
+            return VendorProfile.objects.none()
         if user.is_staff:
             return VendorProfile.objects.all()
         return VendorProfile.objects.filter(user=user)
@@ -48,7 +56,8 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-
+        if not user.is_authenticated:
+            return Service.objects.none() 
         if user.is_staff:
             # Admin sees all
             return Service.objects.all()
@@ -86,6 +95,9 @@ class ServiceVariantViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        if not user.is_authenticated:
+            return ServiceVariant.objects.none()
+        
         if user.is_staff:
             return ServiceVariant.objects.all()
 
@@ -117,3 +129,50 @@ class ServiceVariantViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("You can only update variants of your own services.")
 
         serializer.save()
+
+
+class RepairOrderViewSet(viewsets.ModelViewSet):
+    queryset = RepairOrder.objects.all()
+    serializer_class = RepairOrderSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return RepairOrder.objects.none()
+        if user.is_staff:
+            return RepairOrder.objects.all()
+        return RepairOrder.objects.filter(customer=user)
+
+    @swagger_auto_schema(request_body=RepairOrderCreateSerializer)
+    def create(self, request, *args, **kwargs):
+        serializer = RepairOrderCreateSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        variant = serializer.validated_data['variant']
+        lock_key = f"variant_lock_{variant.id}"
+
+        try:
+            with cache.lock(lock_key, timeout=10, blocking_timeout=5):
+                with transaction.atomic():
+                    variant.refresh_from_db()
+                    if variant.stock <= 0:
+                        raise ValidationError({"variant": "No stock available for this service variant."})
+                    variant.stock -= 1
+                    variant.save(update_fields=["stock"])
+                    repair_order = RepairOrder.objects.create(
+                        customer=request.user,
+                        vendor=variant.service.vendor,
+                        variant=variant,
+                        total_amount=variant.price,
+                        status="pending"
+                    )
+        except ValidationError:
+            raise
+        except Exception as e:
+            raise ValidationError({"detail": f"Unexpected error: {str(e)}"})
+
+        output_serializer = RepairOrderSerializer(repair_order)
+        headers = self.get_success_headers(output_serializer.data)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    
