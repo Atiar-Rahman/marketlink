@@ -171,3 +171,4 @@ DJOSER = {
 SSLC_STORE_ID = config('STORE_ID')
 SSLC_STORE_PASS = config('STORE_PASS')
 SSLC_IS_SANDBOX = config('SSLC_IS_SANDBOX', default=True, cast=bool)
+WEBHOOK_SECRET=''
