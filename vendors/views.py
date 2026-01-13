@@ -141,7 +141,6 @@ class ServiceVariantViewSet(viewsets.ModelViewSet):
 
 
 class RepairOrderViewSet(viewsets.ModelViewSet):
-    queryset = RepairOrder.objects.all()
     serializer_class = RepairOrderSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -191,7 +190,11 @@ def initiate_payment(request):
     user = request.user
     amount = request.data.get("amount")
     order_id = request.data.get("orderId")
-
+    settings = {
+        'store_id': main_settings.SSLC_STORE_ID,
+        'store_pass': main_settings.SSLC_STORE_PASS,
+        'issandbox': main_settings.SSLC_IS_SANDBOX,
+    }
     settings = {'store_id': 'phima67ddc8dba290b',
                 'store_pass': 'phima67ddc8dba290b@ssl', 'issandbox': True}
     sslcz = SSLCOMMERZ(settings)
@@ -228,7 +231,7 @@ def initiate_payment(request):
 def payment_success(request):
     print("Inside success")
     order_id = request.data.get("tran_id").split('_')[1]
-    order = RepairOrder.objects.get(id=order_id)
+    order = RepairOrder.objects.get(order_id=order_id)
     order.status = "paid"
     order.save()
     return HttpResponseRedirect(f"{main_settings.FRONTEND_URL}/dashboard/orders/")
